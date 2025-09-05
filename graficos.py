@@ -90,3 +90,117 @@ fig.update_layout(
 )
 
 fig.show()
+
+
+
+
+
+
+
+
+
+
+
+
+import plotly.express as px
+
+fig = px.area(
+    df,
+    x="date",
+    y=["Law", "Business", "Tech", "Biotech"],
+    title="Evolución diaria: Subcategorías apiladas",
+    labels={"value": "KPI diario", "date": "Fecha", "variable": "Subcategoría"},
+)
+
+fig.update_layout(template="plotly_white")
+fig.show()
+
+
+
+
+
+
+# Calcular variaciones
+df_deltas = df[['date','Corporate','Private','Law','Business','Tech','Biotech']].copy()
+for col in ['Corporate','Private','Law','Business','Tech','Biotech']:
+    df_deltas[col] = df_deltas[col].diff()
+
+fig = px.bar(
+    df_deltas.melt(id_vars="date", var_name="Serie", value_name="Delta"),
+    x="date", y="Delta", color="Serie",
+    title="Variación diaria por categoría y subcategoría",
+    barmode="group"
+)
+fig.update_layout(template="plotly_white")
+fig.show()
+
+
+
+
+import plotly.express as px
+
+df_deltas = df[['date','Corporate','Private','Law','Business','Tech','Biotech']].copy()
+for col in ['Corporate','Private','Law','Business','Tech','Biotech']:
+    df_deltas[col] = df_deltas[col].diff()
+
+# Transformar a formato ancho
+heatmap_data = df_deltas.set_index("date").T
+
+fig = px.imshow(
+    heatmap_data,
+    aspect="auto",
+    color_continuous_scale="RdYlGn",
+    origin="lower",
+    title="Mapa de calor de variaciones diarias",
+    labels=dict(x="Fecha", y="Serie", color="Δ diario")
+)
+fig.update_layout(template="plotly_white")
+fig.show()
+
+
+
+
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                    subplot_titles=("Corporate (Law + Business)", "Private (Tech + Biotech)"))
+
+# Corporate
+fig.add_trace(go.Scatter(x=df['date'], y=df['Law'], mode='lines', name='Law'), row=1, col=1)
+fig.add_trace(go.Scatter(x=df['date'], y=df['Business'], mode='lines', name='Business'), row=1, col=1)
+fig.add_trace(go.Scatter(x=df['date'], y=df['Corporate'], mode='lines+markers', name='Corporate total',
+                         line=dict(width=3, color='black')), row=1, col=1)
+
+# Private
+fig.add_trace(go.Scatter(x=df['date'], y=df['Tech'], mode='lines', name='Tech'), row=2, col=1)
+fig.add_trace(go.Scatter(x=df['date'], y=df['Biotech'], mode='lines', name='Biotech'), row=2, col=1)
+fig.add_trace(go.Scatter(x=df['date'], y=df['Private'], mode='lines+markers', name='Private total',
+                         line=dict(width=3, color='blue')), row=2, col=1)
+
+fig.update_layout(
+    height=600, width=900,
+    title="Evolución separada: Corporate y Private con sus subcategorías",
+    template="plotly_white"
+)
+fig.show()
+
+
+
+
+fig = px.treemap(
+    df.melt(id_vars="date", value_vars=["Law","Business","Tech","Biotech"],
+            var_name="Subcategoría", value_name="KPI"),
+    path=[px.Constant("Total"), "Subcategoría"],
+    values="KPI",
+    title="Treemap de participación relativa (ejemplo en una fecha)",
+)
+
+fig.update_traces(root_color="lightgrey")
+fig.update_layout(margin = dict(t=50, l=25, r=25, b=25))
+fig.show()
+
+
+
+
+
