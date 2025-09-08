@@ -1,284 +1,217 @@
-import pandas as pd
+# ============================================
+# Simulated 2-month dataset + Plotly dashboards
+# ============================================
 import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# Fechas ~2 meses
+# -----------------------------
+# 1) Create ~60 days of data
+# -----------------------------
+np.random.seed(42)
 dates = pd.date_range("2025-07-01", periods=60, freq="D")
 
-np.random.seed(42)
+def smooth_series(base, size, amp=0.10, noise=0.04, period=14, phase=None):
+    """Multiplicative sinusoidal trend + noise around a base level"""
+    t = np.arange(size)
+    if phase is None:
+        phase = np.random.uniform(0, 2*np.pi)
+    series = base * (1 + amp*np.sin(2*np.pi*t/period + phase) + noise*np.random.randn(size))
+    series = np.clip(series, 1, None)
+    return series.round().astype(int)
 
-# Private subcategorías (con valores inspirados en tus datos originales)
-private = pd.DataFrame({
-    "date": dates,
-    "Individual": np.random.randint(100000, 115000, size=len(dates)),
-    "Director": np.random.randint(5000, 6000, size=len(dates)),
-    "UBO": np.random.randint(3500, 4500, size=len(dates)),
-    "Customer": np.random.randint(1200, 1500, size=len(dates)),
-    "Representative": np.random.randint(700, 900, size=len(dates)),
-    "Guarantor": np.random.randint(10, 30, size=len(dates)),
-    "Unknown": np.random.randint(0, 5, size=len(dates)),
-})
+# Set bases so magnitudes are close (no single series dominates)
+# --- Private subcategories
+priv_bases = dict(
+    Individual=2200, Director=650, UBO=600, Customer=550,
+    Representative=500, Guarantor=80, Unknown=40
+)
+# --- Corporate subcategories
+corp_bases = dict(
+    SUPPLIER=1800, Shareholder=140, Remarketing_Dealer=320, CUS_CORPORATE=720
+)
 
-# Corporate subcategorías
-corporate = pd.DataFrame({
-    "date": dates,
-    "SUPPLIER": np.random.randint(5000, 6000, size=len(dates)),
-    "Shareholder": np.random.randint(50, 100, size=len(dates)),
-    "Remarketing Dealer": np.random.randint(500, 600, size=len(dates)),
-    "CUS_CORPORATE": np.random.randint(900, 1100, size=len(dates)),
-})
+# Generate series
+data = {"date": dates}
+for k, base in {**priv_bases, **corp_bases}.items():
+    data[k] = smooth_series(base, len(dates))
 
-# Totales
-df = private.merge(corporate, on="date")
-df["Private"] = df[["Individual","Director","UBO","Customer","Representative","Guarantor","Unknown"]].sum(axis=1)
-df["Corporate"] = df[["SUPPLIER","Shareholder","Remarketing Dealer","CUS_CORPORATE"]].sum(axis=1)
+df = pd.DataFrame(data)
 
-print(df.head())
-
-
-
-import pandas as pd
-import plotly.graph_objects as go
-from datetime import date
+# Totals
+private_cols = list(priv_bases.keys())
+corporate_cols = list(corp_bases.keys())
+df["Private"] = df[private_cols].sum(axis=1)
+df["Corporate"] = df[corporate_cols].sum(axis=1)
 
 # -----------------------------
-# Datos snapshot (un solo día)
+# 2) Color palette (distinct)
 # -----------------------------
-private = {
-    "Individual": 109736, "Director": 5580, "UBO": 4001, "Customer": 1327,
-    "Representative": 784, "Guarantor": 18, "Unknown": 1
-}
-corporate = {
-    "SUPPLIER": 5501, "Shareholder": 63, "Remarketing Dealer": 524, "CUS_CORPORATE": 995
-}
-
-snap_date = pd.to_datetime(date.today())  # usa la fecha de hoy; cambia si quieres
-
-df = pd.DataFrame({
-    "date": [snap_date],
-    "Corporate": [sum(corporate.values())],
-    "Private":   [sum(private.values())],
-})
-
-# Para permitir trazar también subcategorías en el mismo estilo
-# (se añaden como "columnas" con el mismo valor en ese día)
-for k, v in corporate.items():
-    df[k] = v
-for k, v in private.items():
-    df[k] = v
-
-# -----------------------------
-# GRÁFICO PLOTLY (adaptación del tuyo)
-# -----------------------------
-fig = go.Figure()
-
-series = [
-    ("Corporate", "#111111", True),
-    ("Private",   "#1f77b4", True),
+colors = {
+    # Totals
+    "Corporate": "#111111",
+    "Private":   "#1f77b4",
     # Corporate subcats
-    ("SUPPLIER", "rgba(0,0,0,0.6)", False),
-    ("Shareholder", "rgba(0,0,0,0.6)", False),
-    ("Remarketing Dealer", "rgba(0,0,0,0.6)", False),
-    ("CUS_CORPORATE", "rgba(0,0,0,0.6)", False),
+    "SUPPLIER": "#e41a1c",
+    "Shareholder": "#377eb8",
+    "Remarketing_Dealer": "#4daf4a",
+    "CUS_CORPORATE": "#984ea3",
     # Private subcats
-    ("Individual", "#2ca02c", False),
-    ("Director",   "#2ca02c", False),
-    ("UBO",        "#2ca02c", False),
-    ("Customer",   "#2ca02c", False),
-    ("Representative", "#2ca02c", False),
-    ("Guarantor",  "#2ca02c", False),
-    ("Unknown",    "#2ca02c", False),
-]
+    "Individual": "#ff7f00",
+    "Director": "#a65628",
+    "UBO": "#f781bf",
+    "Customer": "#999999",
+    "Representative": "#66c2a5",
+    "Guarantor": "#8da0cb",
+    "Unknown": "#e78ac3",
+}
 
-for name, color, visible in series:
-    fig.add_trace(
-        go.Scatter(
-            x=df["date"], y=df[name],
-            name=name, mode="lines+markers",
-            line=dict(width=3, color=color),
-            marker=dict(size=9),
-            visible=True if visible else "legendonly",
-            hovertemplate="<b>%{fullData.name}</b><br>Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:,}<extra></extra>",
-        )
-    )
+# ============================================
+# A) Evolution lines: Corporate, Private & subcats (with buttons)
+# ============================================
+fig_main = go.Figure()
+series_order = ["Corporate","Private"] + corporate_cols + private_cols
 
-fig.update_layout(
-    title="Snapshot: Corporate, Private y subcategorías",
-    xaxis_title="Fecha",
-    yaxis_title="Conteo",
-    hovermode="x unified",
+for name in series_order:
+    fig_main.add_trace(go.Scatter(
+        x=df["date"], y=df[name], name=name,
+        mode="lines+markers",
+        line=dict(width=2.5, color=colors[name]),
+        marker=dict(size=5),
+        visible=True if name in ["Corporate","Private"] else "legendonly",
+        hovertemplate="<b>%{fullData.name}</b><br>Fecha: %{x|%Y-%m-%d}<br>Valor: %{y:,}<extra></extra>",
+    ))
+
+def _vis(state="totals"):
+    if state == "totals":
+        return [name in ["Corporate","Private"] for name in series_order]
+    if state == "subcats":
+        return [name in corporate_cols+private_cols for name in series_order]
+    return [True]*len(series_order)
+
+fig_main.update_layout(
+    title="Evolución diaria: Corporate, Private y subcategorías",
+    xaxis_title="Fecha", yaxis_title="Valor",
+    hovermode="x unified", template="plotly_white",
+    xaxis=dict(rangeslider=dict(visible=True), type="date"),
+    updatemenus=[dict(
+        type="buttons", direction="right", x=0.5, xanchor="center", y=1.12, yanchor="top",
+        buttons=[
+            dict(label="Totales", method="update", args=[{"visible": _vis('totals') }]),
+            dict(label="Subcategorías", method="update", args=[{"visible": _vis('subcats') }]),
+            dict(label="Todo", method="update", args=[{"visible": _vis('all') }]),
+        ]
+    )],
     legend_title_text="Serie",
-    template="plotly_white",
-    xaxis=dict(type="date"),
     margin=dict(l=60, r=30, t=60, b=60),
 )
+fig_main.show()
 
-def _visibility(all_on=False, only_totals=False):
-    if only_totals:
-        # Las dos primeras trazas son Corporate y Private
-        mask = [True, True] + [False]*(len(series)-2)
-        return mask
-    if all_on:
-        return [True]*len(series)
-    # Por defecto: solo totales visibles
-    return [True, True] + ["legendonly"]*(len(series)-2)
+# ============================================
+# B) Stacked AREA: Corporate subcats  /  Private subcats
+# ============================================
+def stacked_area(df, cols, title):
+    fig = go.Figure()
+    cum = np.zeros(len(df))
+    for c in cols:
+        fig.add_trace(go.Scatter(
+            x=df["date"], y=df[c], name=c, stackgroup="one",
+            mode="none", # area only
+            hovertemplate=f"<b>{c}</b><br>%{{x|%Y-%m-%d}}<br>Valor: %{{y:,}}<extra></extra>",
+            line=dict(color=colors[c])
+        ))
+    fig.update_layout(
+        title=title, xaxis_title="Fecha", yaxis_title="Valor",
+        template="plotly_white", hovermode="x unified",
+        xaxis=dict(type="date")
+    )
+    return fig
 
-fig.update_layout(
-    updatemenus=[dict(
-        type="buttons", direction="right",
-        x=0.5, xanchor="center", y=1.12, yanchor="top",
-        buttons=[
-            dict(label="Totales", method="update",
-                 args=[{"visible": _visibility(only_totals=True)}]),
-            dict(label="Subcategorías", method="update",
-                 args=[{"visible": [False, False] + [True]*(len(series)-2)}]),
-            dict(label="Todo", method="update",
-                 args=[{"visible": _visibility(all_on=True)}]),
-        ]
-    )]
+fig_area_corp = stacked_area(df, corporate_cols, "Corporate – subcategorías (área apilada)")
+fig_area_priv = stacked_area(df, private_cols, "Private – subcategorías (área apilada)")
+fig_area_corp.show()
+fig_area_priv.show()
+
+# ============================================
+# C) Day-to-day variation (Δ): totals + subcats
+# ============================================
+deltas = df[["date"] + series_order].copy()
+for c in series_order:
+    deltas[c] = deltas[c].diff()
+
+# Totals
+fig_delta_tot = go.Figure()
+fig_delta_tot.add_trace(go.Bar(x=deltas["date"], y=deltas["Corporate"], name="Δ Corporate", marker_color=colors["Corporate"]))
+fig_delta_tot.add_trace(go.Bar(x=deltas["date"], y=deltas["Private"], name="Δ Private", marker_color=colors["Private"]))
+fig_delta_tot.update_layout(
+    title="Variación diaria (Δ): Totales",
+    xaxis_title="Fecha", yaxis_title="Δ vs. día anterior",
+    template="plotly_white", barmode="group", xaxis=dict(type="date")
 )
+fig_delta_tot.add_hline(y=0, line_color="black", line_width=1)
+fig_delta_tot.show()
 
-fig.show()
-
-
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
-
-fig_donuts = make_subplots(
-    rows=1, cols=2, specs=[[{"type":"domain"},{"type":"domain"}]],
-    subplot_titles=[f"Private (n={sum(private.values()):,})", f"Corporate (n={sum(corporate.values()):,})"]
+# Corporate subcats Δ
+fig_delta_c = go.Figure()
+for c in corporate_cols:
+    fig_delta_c.add_trace(go.Bar(x=deltas["date"], y=deltas[c], name=f"Δ {c}", marker_color=colors[c]))
+fig_delta_c.update_layout(
+    title="Variación diaria (Δ): Corporate subcategorías",
+    xaxis_title="Fecha", yaxis_title="Δ vs. día anterior",
+    template="plotly_white", barmode="group", xaxis=dict(type="date")
 )
+fig_delta_c.add_hline(y=0, line_color="black", line_width=1)
+fig_delta_c.show()
 
-fig_donuts.add_trace(
-    go.Pie(labels=list(private.keys()), values=list(private.values()),
-           hole=0.55, name="Private",
-           hovertemplate="<b>%{label}</b><br>Conteo: %{value:,}<br>% %{percent}<extra></extra>"),
-    1, 1
+# Private subcats Δ
+fig_delta_p = go.Figure()
+for c in private_cols:
+    fig_delta_p.add_trace(go.Bar(x=deltas["date"], y=deltas[c], name=f"Δ {c}", marker_color=colors[c]))
+fig_delta_p.update_layout(
+    title="Variación diaria (Δ): Private subcategorías",
+    xaxis_title="Fecha", yaxis_title="Δ vs. día anterior",
+    template="plotly_white", barmode="group", xaxis=dict(type="date")
 )
-fig_donuts.add_trace(
-    go.Pie(labels=list(corporate.keys()), values=list(corporate.values()),
-           hole=0.55, name="Corporate",
-           hovertemplate="<b>%{label}</b><br>Conteo: %{value:,}<br>% %{percent}<extra></extra>"),
-    1, 2
+fig_delta_p.add_hline(y=0, line_color="black", line_width=1)
+fig_delta_p.show()
+
+# ============================================
+# D) Heatmap of daily deltas (all series)
+# ============================================
+heat = deltas.set_index("date")[series_order].T  # rows=series, cols=days
+fig_heat = px.imshow(
+    heat, aspect="auto", origin="lower", color_continuous_scale="RdYlGn", 
+    title="Mapa de calor – variaciones diarias (todas las series)",
+    labels=dict(x="Fecha", y="Serie", color="Δ diario")
 )
+fig_heat.update_layout(template="plotly_white")
+fig_heat.show()
 
-fig_donuts.update_traces(textinfo="percent+label")
-fig_donuts.update_layout(title="Distribución por subcategorías: Private vs Corporate", template="plotly_white")
-fig_donuts.show()
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
-import plotly.express as px
-import pandas as pd
-
-# Private
-dfp = pd.DataFrame({"subcategory": list(private.keys()), "count": list(private.values())})
-dfp = dfp.sort_values("count", ascending=True)
-dfp["pct"] = dfp["count"] / dfp["count"].sum()
-
-fig_p = px.bar(
-    dfp, x="count", y="subcategory", orientation="h",
-    text=dfp["pct"].map(lambda p: f"{p:.1%}"),
-    title=f"Private (n={dfp['count'].sum():,}) – barras con %",
-    labels={"count":"Conteo","subcategory":"Subcategoría"}
-)
-fig_p.update_traces(textposition="outside")
-fig_p.update_layout(template="plotly_white")
-fig_p.show()
+# ============================================
+# E) Two-panel subplot (Corporate vs Private): totals (thick) + subcats
+# ============================================
+fig_sub = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        subplot_titles=("Corporate (total + subcategorías)", "Private (total + subcategorías)"))
 
 # Corporate
-dfc = pd.DataFrame({"subcategory": list(corporate.keys()), "count": list(corporate.values())})
-dfc = dfc.sort_values("count", ascending=True)
-dfc["pct"] = dfc["count"] / dfc["count"].sum()
+for c in corporate_cols:
+    fig_sub.add_trace(go.Scatter(x=df["date"], y=df[c], name=c, mode="lines",
+                                 line=dict(width=1.8, color=colors[c])), row=1, col=1)
+fig_sub.add_trace(go.Scatter(x=df["date"], y=df["Corporate"], name="Corporate total", mode="lines+markers",
+                             line=dict(width=3.5, color=colors["Corporate"])), row=1, col=1)
 
-fig_c = px.bar(
-    dfc, x="count", y="subcategory", orientation="h",
-    text=dfc["pct"].map(lambda p: f"{p:.1%}"),
-    title=f"Corporate (n={dfc['count'].sum():,}) – barras con %",
-    labels={"count":"Conteo","subcategory":"Subcategoría"}
+# Private
+for c in private_cols:
+    fig_sub.add_trace(go.Scatter(x=df["date"], y=df[c], name=c, mode="lines",
+                                 line=dict(width=1.8, color=colors[c])), row=2, col=1)
+fig_sub.add_trace(go.Scatter(x=df["date"], y=df["Private"], name="Private total", mode="lines+markers",
+                             line=dict(width=3.5, color=colors["Private"])), row=2, col=1)
+
+fig_sub.update_layout(
+    height=700, title="Corporate vs Private – totales y subcategorías",
+    template="plotly_white", hovermode="x unified",
+    xaxis2=dict(title="Fecha", type="date"), yaxis_title="Valor"
 )
-fig_c.update_traces(textposition="outside")
-fig_c.update_layout(template="plotly_white")
-fig_c.show()
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
-import plotly.graph_objects as go
-
-fig_stack = go.Figure()
-
-# Apilado de Corporate
-fig_stack.add_trace(go.Bar(name='SUPPLIER', x=['Corporate'], y=[corporate['SUPPLIER']]))
-fig_stack.add_trace(go.Bar(name='Shareholder', x=['Corporate'], y=[corporate['Shareholder']]))
-fig_stack.add_trace(go.Bar(name='Remarketing Dealer', x=['Corporate'], y=[corporate['Remarketing Dealer']]))
-fig_stack.add_trace(go.Bar(name='CUS_CORPORATE', x=['Corporate'], y=[corporate['CUS_CORPORATE']]))
-
-# Apilado de Private
-fig_stack.add_trace(go.Bar(name='Individual', x=['Private'], y=[private['Individual']]))
-fig_stack.add_trace(go.Bar(name='Director', x=['Private'], y=[private['Director']]))
-fig_stack.add_trace(go.Bar(name='UBO', x=['Private'], y=[private['UBO']]))
-fig_stack.add_trace(go.Bar(name='Customer', x=['Private'], y=[private['Customer']]))
-fig_stack.add_trace(go.Bar(name='Representative', x=['Private'], y=[private['Representative']]))
-fig_stack.add_trace(go.Bar(name='Guarantor', x=['Private'], y=[private['Guarantor']]))
-fig_stack.add_trace(go.Bar(name='Unknown', x=['Private'], y=[private['Unknown']]))
-
-fig_stack.update_layout(
-    barmode='stack',
-    title='Private vs Corporate – barras apiladas por subcategoría',
-    yaxis_title='Conteo',
-    template='plotly_white'
-)
-fig_stack.show()
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
-import plotly.graph_objects as go
-
-fig_stack = go.Figure()
-
-# Apilado de Corporate
-fig_stack.add_trace(go.Bar(name='SUPPLIER', x=['Corporate'], y=[corporate['SUPPLIER']]))
-fig_stack.add_trace(go.Bar(name='Shareholder', x=['Corporate'], y=[corporate['Shareholder']]))
-fig_stack.add_trace(go.Bar(name='Remarketing Dealer', x=['Corporate'], y=[corporate['Remarketing Dealer']]))
-fig_stack.add_trace(go.Bar(name='CUS_CORPORATE', x=['Corporate'], y=[corporate['CUS_CORPORATE']]))
-
-# Apilado de Private
-fig_stack.add_trace(go.Bar(name='Individual', x=['Private'], y=[private['Individual']]))
-fig_stack.add_trace(go.Bar(name='Director', x=['Private'], y=[private['Director']]))
-fig_stack.add_trace(go.Bar(name='UBO', x=['Private'], y=[private['UBO']]))
-fig_stack.add_trace(go.Bar(name='Customer', x=['Private'], y=[private['Customer']]))
-fig_stack.add_trace(go.Bar(name='Representative', x=['Private'], y=[private['Representative']]))
-fig_stack.add_trace(go.Bar(name='Guarantor', x=['Private'], y=[private['Guarantor']]))
-fig_stack.add_trace(go.Bar(name='Unknown', x=['Private'], y=[private['Unknown']]))
-
-fig_stack.update_layout(
-    barmode='stack',
-    title='Private vs Corporate – barras apiladas por subcategoría',
-    yaxis_title='Conteo',
-    template='plotly_white'
-)
-fig_stack.show()
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
-import plotly.express as px
-import pandas as pd
-
-sun = pd.DataFrame(
-    [["Private", k, v] for k, v in private.items()] +
-    [["Corporate", k, v] for k, v in corporate.items()],
-    columns=["Parent","Subcategory","Count"]
-)
-sun["Root"] = "Total"
-
-fig_sun = px.sunburst(
-    sun, path=["Root","Parent","Subcategory"], values="Count",
-    title=f"Jerarquía Total → (Private / Corporate) → Subcategorías (Total n={(sun['Count'].sum()):,})",
-    color="Parent", color_discrete_sequence=px.colors.qualitative.Set2,
-    branchvalues="total"
-)
-fig_sun.update_layout(template="plotly_white")
-fig_sun.show()
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+fig_sub.show()
