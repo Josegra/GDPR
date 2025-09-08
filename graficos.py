@@ -1,71 +1,63 @@
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# Definir subcategorías
+# Subcategorías
 priv_cols = ["Individual", "Director", "UBO", "Customer", "Representative", "Guarantor", "Unknown"]
 corp_cols = ["SUPPLIER", "Shareholder", "Remarketing Dealer", "CUS_CORPORATE"]
 
-# Crear subplots: 2 filas (Private arriba, Corporate abajo)
+# Crear subplots: 1 fila, 2 columnas
 fig = make_subplots(
-    rows=2, cols=1, shared_xaxes=True,
+    rows=1, cols=2, shared_yaxes=True,
     subplot_titles=("Private – subcategorías", "Corporate – subcategorías")
 )
 
-# --- Private subcats
+# --- Private (col=1)
 for c in priv_cols:
     fig.add_trace(
         go.Scatter(
             x=df["date"], y=df[c],
-            mode="lines+markers",
-            name=c,
-            line=dict(width=2),
-            marker=dict(size=5)
+            mode="lines+markers", name=c,
+            line=dict(width=2), marker=dict(size=5)
         ),
         row=1, col=1
     )
-# Total Private resaltado
+# Total Private
 fig.add_trace(
     go.Scatter(
         x=df["date"], y=df["Private"],
-        mode="lines+markers",
-        name="Private total",
-        line=dict(width=4, color="royalblue"),
-        marker=dict(size=7, color="royalblue")
+        mode="lines+markers", name="Private total",
+        line=dict(width=4, color="royalblue"), marker=dict(size=7, color="royalblue")
     ),
     row=1, col=1
 )
 
-# --- Corporate subcats
+# --- Corporate (col=2)
 for c in corp_cols:
     fig.add_trace(
         go.Scatter(
             x=df["date"], y=df[c],
-            mode="lines+markers",
-            name=c,
-            line=dict(width=2),
-            marker=dict(size=5)
+            mode="lines+markers", name=c,
+            line=dict(width=2), marker=dict(size=5)
         ),
-        row=2, col=1
+        row=1, col=2
     )
-# Total Corporate resaltado
+# Total Corporate
 fig.add_trace(
     go.Scatter(
         x=df["date"], y=df["Corporate"],
-        mode="lines+markers",
-        name="Corporate total",
-        line=dict(width=4, color="black"),
-        marker=dict(size=7, color="black")
+        mode="lines+markers", name="Corporate total",
+        line=dict(width=4, color="black"), marker=dict(size=7, color="black")
     ),
-    row=2, col=1
+    row=1, col=2
 )
 
 # Layout
 fig.update_layout(
-    height=700, width=1000,
-    title="Evolución diaria de subcategorías – Private (arriba) y Corporate (abajo)",
+    height=500, width=1200,
+    title="Evolución diaria de subcategorías – Private (izquierda) vs Corporate (derecha)",
     template="plotly_white",
     hovermode="x unified",
-    xaxis2=dict(title="Fecha"),
+    xaxis_title="Fecha", xaxis2_title="Fecha",
     yaxis_title="Valor"
 )
 
