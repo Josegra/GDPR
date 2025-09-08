@@ -1,4 +1,42 @@
 import pandas as pd
+import numpy as np
+
+# Fechas ~2 meses
+dates = pd.date_range("2025-07-01", periods=60, freq="D")
+
+np.random.seed(42)
+
+# Private subcategorías (con valores inspirados en tus datos originales)
+private = pd.DataFrame({
+    "date": dates,
+    "Individual": np.random.randint(100000, 115000, size=len(dates)),
+    "Director": np.random.randint(5000, 6000, size=len(dates)),
+    "UBO": np.random.randint(3500, 4500, size=len(dates)),
+    "Customer": np.random.randint(1200, 1500, size=len(dates)),
+    "Representative": np.random.randint(700, 900, size=len(dates)),
+    "Guarantor": np.random.randint(10, 30, size=len(dates)),
+    "Unknown": np.random.randint(0, 5, size=len(dates)),
+})
+
+# Corporate subcategorías
+corporate = pd.DataFrame({
+    "date": dates,
+    "SUPPLIER": np.random.randint(5000, 6000, size=len(dates)),
+    "Shareholder": np.random.randint(50, 100, size=len(dates)),
+    "Remarketing Dealer": np.random.randint(500, 600, size=len(dates)),
+    "CUS_CORPORATE": np.random.randint(900, 1100, size=len(dates)),
+})
+
+# Totales
+df = private.merge(corporate, on="date")
+df["Private"] = df[["Individual","Director","UBO","Customer","Representative","Guarantor","Unknown"]].sum(axis=1)
+df["Corporate"] = df[["SUPPLIER","Shareholder","Remarketing Dealer","CUS_CORPORATE"]].sum(axis=1)
+
+print(df.head())
+
+
+
+import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
 
