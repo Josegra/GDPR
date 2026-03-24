@@ -265,3 +265,31 @@ os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
 fig.write_html(OUTPUT_PATH, include_plotlyjs="cdn", full_html=True,
                config={"scrollZoom": True})
 print(f"✅ Exportado: {OUTPUT_PATH}")
+
+
+
+# TEST COMPLETO
+pdf_s2_all = get_pdf_s2(df_result)
+pdf_s2_all = pdf_s2_all[pdf_s2_all["source_type2_viz"].notna()]
+date_vals_all = sorted(pdf_s2_all["date"].unique().tolist())
+
+print("1. Tipo date_vals_all[0]:", type(date_vals_all[0]))
+print("2. date_vals_all[:3]:", date_vals_all[:3])
+print("3. Tipo pdf_s2_all date:", pdf_s2_all["date"].dtype)
+
+# test para el primer src/sg que exista
+src_test = "remarketing"
+sg_test  = pdf_s2_all[pdf_s2_all["source_type"]==src_test]["source_type2_viz"].iloc[0]
+print("4. sg_test:", sg_test)
+
+sub = pdf_s2_all[
+    (pdf_s2_all["source_type"] == src_test) &
+    (pdf_s2_all["source_type2_viz"] == sg_test)
+][["date","cnt"]]
+print("5. sub shape:", sub.shape)
+print("6. sub head:\n", sub.head(3))
+print("7. sub date dtype:", sub["date"].dtype)
+
+# compara tipos
+print("8. date_vals_all[0] == sub.date.iloc[0]:", date_vals_all[0] == sub["date"].iloc[0])
+print("9. type match:", type(date_vals_all[0]), type(sub["date"].iloc[0]))
