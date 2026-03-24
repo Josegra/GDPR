@@ -8,17 +8,20 @@ import os
 # PALETTE
 # ════════════════════════════════════════════════
 palette = {
-    "remarketing":    "#636EFA",
-    "third party":    "#EF5538",
-    "datacap":        "#00CC96",
-    "Customer":       "#1f77b4",
-    "UBO":            "#ff7f0e",
-    "Representative": "#2ca02c",
-    "Shareholder":    "#d62728",
-    "Director":       "#9467bd",
-    "CUS_PRIVATE":    "#e377c2",
-    "SUPPLIER":       "#7f7f7f",
-    "CUS CORPORATE":  "#8c564b",
+    "remarketing":         "#636EFA",
+    "third party":         "#EF5538",
+    "datacap":             "#00CC96",
+    "Customer":            "#1f77b4",
+    "UBO":                 "#ff7f0e",
+    "Representative":      "#2ca02c",
+    "Shareholder":         "#d62728",
+    "Director":            "#9467bd",
+    "CUS_PRIVATE":         "#e377c2",
+    "SUPPLIER":            "#7f7f7f",
+    "CUS CORPORATE":       "#8c564b",
+    "Remarketing Dealer":  "#bcbd22",
+    "Legal Representative":"#17becf",
+    "other third parties": "#aec7e8",
 }
 
 all_s2 = (df_result.select("source_type2_viz").distinct()
@@ -41,11 +44,11 @@ all_branches = ["All"] + branch_vals
 def get_pdf_type(data):
     pdf = (data.groupBy("date", "source_type")
                .agg(F.sum("count").alias("cnt"))
-               .toPandas()
-               .pivot(index="date", columns="source_type", values="cnt")
-               .fillna(0).reset_index()
-               .sort_values("date"))
+               .toPandas())
     pdf["date"] = pd.to_datetime(pdf["date"])
+    pdf = (pdf.pivot(index="date", columns="source_type", values="cnt")
+              .fillna(0).reset_index()
+              .sort_values("date"))
     for col in ["remarketing", "third party", "datacap"]:
         if col not in pdf.columns:
             pdf[col] = 0
@@ -54,15 +57,27 @@ def get_pdf_type(data):
 def get_pdf_s2(data):
     pdf = (data.groupBy("date", "source_type", "source_type2_viz")
                .agg(F.sum("count").alias("cnt"))
-               .toPandas()
-               .sort_values("date"))
+               .toPandas())
     pdf["date"] = pd.to_datetime(pdf["date"])
+    pdf = pdf[pdf["source_type2_viz"].notna()]   # elimina None
+    pdf = pdf.sort_values("date").reset_index(drop=True)
     return pdf
 
 def get_y_s2(pdf, src, sg, date_vals):
-    mask = (pdf["source_type"] == src) & (pdf["source_type2_viz"] == sg)
-    sub  = pdf[mask].set_index("date")["cnt"]
+    sub = pdf[
+        (pdf["source_type"] == src) &
+        (pdf["source_type2_viz"] == sg)
+    ][["date", "cnt"]].copy()
+    sub = sub.groupby("date")["cnt"].sum()       # evita duplicados
     return [int(sub.get(d, 0)) for d in date_vals]
+
+# ════════════════════════════════════════════════
+# PRECOMPUTA "ALL"
+# ════════════════════════════════════════════════
+pdf_type_all  = get_pdf_type(df_result)
+pdf_s2_all    = get_pdf_s2(df_result)
+x_dates_all   = pdf_type_all["date"].tolist()
+date_vals_all = sorted(pdf_s2_all["date"].unique().tolist())  # desde s2
 
 # ════════════════════════════════════════════════
 # FIGURA
@@ -74,12 +89,6 @@ fig = make_subplots(
     vertical_spacing=0.18,
     shared_xaxes=True,
 )
-
-# ── precomputa "All" ──
-pdf_type_all  = get_pdf_type(df_result)
-pdf_s2_all    = get_pdf_s2(df_result)
-x_dates_all   = pdf_type_all["date"].tolist()
-date_vals_all = pdf_s2_all["date"].sort_values().unique().tolist()
 
 # ── GRAPH 1: lines ──
 for col, color in [("remarketing","#636EFA"),
@@ -107,7 +116,6 @@ n1 = 3  # traces 0-2 lines | traces 3-5 bars
 # ── GRAPH 2: lines + bars ──
 traces_line_g2 = []
 traces_bar_g2  = []
-src_trace_map  = {"remarketing": [], "third party": [], "datacap": []}
 g2_structure   = []
 
 for src in ["remarketing", "third party", "datacap"]:
@@ -123,7 +131,6 @@ for src in ["remarketing", "third party", "datacap"]:
             line=dict(width=2, color=color), marker=dict(size=4),
             visible=False, legendgroup=sg, showlegend=True,
         ), row=2, col=1)
-        src_trace_map[src].append(len(fig.data) - 1)
         traces_line_g2.append(len(fig.data) - 1)
         g2_structure.append((src, sg))
 
@@ -132,26 +139,20 @@ for src in ["remarketing", "third party", "datacap"]:
             name=f"{sg} ({src})", marker_color=color,
             visible=False, legendgroup=sg, showlegend=False,
         ), row=2, col=1)
-        src_trace_map[src].append(len(fig.data) - 1)
         traces_bar_g2.append(len(fig.data) - 1)
 
 total = len(fig.data)
 
 # ════════════════════════════════════════════════
-# ESTADO INICIAL — G1 lines + G2 remarketing lines
+# ESTADO INICIAL
 # ════════════════════════════════════════════════
 for i in range(n1):
     fig.data[i].visible = True               # G1 lines ON
 for i in range(n1, n1 * 2):
     fig.data[i].visible = False              # G1 bars OFF
-
-remarketing_line_indices = [
-    traces_line_g2[i]
-    for i, (src, sg) in enumerate(g2_structure)
-    if src == "remarketing"
-]
-for i in remarketing_line_indices:
-    fig.data[i].visible = True               # G2 remarketing lines ON
+for i, (src, sg) in enumerate(g2_structure):
+    if src == "remarketing":
+        fig.data[traces_line_g2[i]].visible = True   # G2 remarketing lines ON
 
 # ════════════════════════════════════════════════
 # BUTTONS G1
@@ -176,28 +177,20 @@ buttons_g1 = [
 # ════════════════════════════════════════════════
 buttons_g2 = []
 for src in ["remarketing", "third party", "datacap"]:
-    line_idx = [
-        traces_line_g2[i]
-        for i, (s, sg) in enumerate(g2_structure)
-        if s == src
-    ]
-    bar_idx = [
-        traces_bar_g2[i]
-        for i, (s, sg) in enumerate(g2_structure)
-        if s == src
-    ]
+    line_idx = [traces_line_g2[i] for i, (s, _) in enumerate(g2_structure) if s == src]
+    bar_idx  = [traces_bar_g2[i]  for i, (s, _) in enumerate(g2_structure) if s == src]
 
     vis_lines = [False] * total
-    for i in range(n1):  vis_lines[i]      = True   # G1 lines ON
-    for i in range(n1):  vis_lines[i + n1] = False  # G1 bars OFF
-    for i in line_idx:   vis_lines[i]      = True   # G2 lines ON
+    for i in range(n1):  vis_lines[i]      = True
+    for i in range(n1):  vis_lines[i + n1] = False
+    for i in line_idx:   vis_lines[i]      = True
     buttons_g2.append(dict(label=f"{src.title()} Lines",
                            method="update", args=[{"visible": vis_lines}]))
 
     vis_bars = [False] * total
-    for i in range(n1):  vis_bars[i]      = True    # G1 lines ON
-    for i in range(n1):  vis_bars[i + n1] = False   # G1 bars OFF
-    for i in bar_idx:    vis_bars[i]      = True    # G2 bars ON
+    for i in range(n1):  vis_bars[i]      = True
+    for i in range(n1):  vis_bars[i + n1] = False
+    for i in bar_idx:    vis_bars[i]      = True
     buttons_g2.append(dict(label=f"{src.title()} Bars",
                            method="update", args=[{"visible": vis_bars}]))
 
@@ -206,11 +199,11 @@ for src in ["remarketing", "third party", "datacap"]:
 # ════════════════════════════════════════════════
 branch_buttons = []
 for branch in all_branches:
-    df_b    = df_result if branch == "All" else df_result.filter(F.col("BRANCH") == branch)
-    pdf_b1  = get_pdf_type(df_b)
-    pdf_b2  = get_pdf_s2(df_b)
-    x1      = pdf_b1["date"].tolist()
-    dvals_b = pdf_b2["date"].sort_values().unique().tolist()
+    df_b   = df_result if branch == "All" else df_result.filter(F.col("BRANCH") == branch)
+    pdf_b1 = get_pdf_type(df_b)
+    pdf_b2 = get_pdf_s2(df_b)
+    x1     = pdf_b1["date"].tolist()
+    dvals_b = sorted(pdf_b2["date"].unique().tolist())
 
     new_x, new_y = [], []
 
@@ -272,17 +265,3 @@ os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
 fig.write_html(OUTPUT_PATH, include_plotlyjs="cdn", full_html=True,
                config={"scrollZoom": True})
 print(f"✅ Exportado: {OUTPUT_PATH}")
-
-
-# DEBUG — ejecuta esto y dime qué imprime
-print("Tipo date:", pdf_s2_all["date"].dtype)
-print("Muestra:", pdf_s2_all.head(3))
-print("Filas totales:", len(pdf_s2_all))
-print("source_type únicos:", pdf_s2_all["source_type"].unique())
-print("source_type2_viz únicos:", pdf_s2_all["source_type2_viz"].unique())
-
-# Test directo de get_y_s2
-src_test = pdf_s2_all["source_type"].iloc[0]
-sg_test  = pdf_s2_all["source_type2_viz"].iloc[0]
-y_test   = get_y_s2(pdf_s2_all, src_test, sg_test, date_vals_all)
-print(f"Test y_vals para {src_test} / {sg_test}:", y_test[:5])
