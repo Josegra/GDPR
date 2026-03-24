@@ -141,12 +141,17 @@ total = len(fig.data)
 # ESTADO INICIAL — G1 lines + G2 remarketing lines
 # ════════════════════════════════════════════════
 for i in range(n1):
-    fig.data[i].visible = True
+    fig.data[i].visible = True               # G1 lines ON
 for i in range(n1, n1 * 2):
-    fig.data[i].visible = False
-for i in src_trace_map["remarketing"]:
-    if i in traces_line_g2:
-        fig.data[i].visible = True
+    fig.data[i].visible = False              # G1 bars OFF
+
+remarketing_line_indices = [
+    traces_line_g2[i]
+    for i, (src, sg) in enumerate(g2_structure)
+    if src == "remarketing"
+]
+for i in remarketing_line_indices:
+    fig.data[i].visible = True               # G2 remarketing lines ON
 
 # ════════════════════════════════════════════════
 # BUTTONS G1
@@ -156,9 +161,9 @@ def make_vis_g1(show_lines):
     for i in range(n1):
         vis[i]      = show_lines
         vis[i + n1] = not show_lines
-    for i in src_trace_map["remarketing"]:
-        if i in traces_line_g2:
-            vis[i] = True
+    for i, (src, sg) in enumerate(g2_structure):
+        if src == "remarketing":
+            vis[traces_line_g2[i]] = True
     return vis
 
 buttons_g1 = [
@@ -171,20 +176,28 @@ buttons_g1 = [
 # ════════════════════════════════════════════════
 buttons_g2 = []
 for src in ["remarketing", "third party", "datacap"]:
-    line_idx = [i for i in src_trace_map[src] if i in traces_line_g2]
-    bar_idx  = [i for i in src_trace_map[src] if i in traces_bar_g2]
+    line_idx = [
+        traces_line_g2[i]
+        for i, (s, sg) in enumerate(g2_structure)
+        if s == src
+    ]
+    bar_idx = [
+        traces_bar_g2[i]
+        for i, (s, sg) in enumerate(g2_structure)
+        if s == src
+    ]
 
     vis_lines = [False] * total
-    for i in range(n1):  vis_lines[i]      = True
-    for i in range(n1):  vis_lines[i + n1] = False
-    for i in line_idx:   vis_lines[i]      = True
+    for i in range(n1):  vis_lines[i]      = True   # G1 lines ON
+    for i in range(n1):  vis_lines[i + n1] = False  # G1 bars OFF
+    for i in line_idx:   vis_lines[i]      = True   # G2 lines ON
     buttons_g2.append(dict(label=f"{src.title()} Lines",
                            method="update", args=[{"visible": vis_lines}]))
 
     vis_bars = [False] * total
-    for i in range(n1):  vis_bars[i]      = True
-    for i in range(n1):  vis_bars[i + n1] = False
-    for i in bar_idx:    vis_bars[i]      = True
+    for i in range(n1):  vis_bars[i]      = True    # G1 lines ON
+    for i in range(n1):  vis_bars[i + n1] = False   # G1 bars OFF
+    for i in bar_idx:    vis_bars[i]      = True    # G2 bars ON
     buttons_g2.append(dict(label=f"{src.title()} Bars",
                            method="update", args=[{"visible": vis_bars}]))
 
