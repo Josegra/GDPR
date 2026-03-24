@@ -1,95 +1,135 @@
-# Project Documentation: Automated Data Retention Management (GDPR)
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from plotly.colors import qualitative
+from plotly.io import to_html
+import os
 
-**Table of Contents**
+# ── Branch values ──
+branch_vals = sorted([b for b in df_result.select("BRANCH").distinct().rdd.flatMap(lambda x: x).collect() if b])
 
-1.  [Executive Summary](#1-executive-summary)
-2.  [Purpose & Legal Basis (GDPR)](#2-purpose--legal-basis-gdpr)
-3.  [Scope & Data Types Affected](#3-scope--data-types-affected)
-4.  [Technical Architecture & Component Roles](#4-technical-architecture--component-roles)
-    * [4.1. Azure Data Factory (ADF)](#41-azure-data-factory-adf)
-    * [4.2. Azure Databricks](#42-azure-databricks)
-5.  [Control, Audit & Reporting Mechanisms](#5-control-audit--reporting-mechanisms)
-6.  [Security & GDPR Compliance Aspects](#6-security--gdpr-compliance-aspects)
-7.  [Key Parameters](#7-key-parameters)
+# ── Palette ──
+palette = {
+    "remarketing": "#636EFA", "third party": "#EF5538", "datacap": "#00CC96",
+    "Customer": "#1f77b4", "UBO": "#ff7f0e", "Representative": "#2ca02c",
+    "Shareholder": "#d62728", "Director": "#9467bd", "CUS_PRIVATE": "#d62728",
+    "SUPPLIER": "#9467bd", "CUS CORPORATE": "#8c564b",
+}
 
----
+fig = make_subplots(rows=2, cols=1,
+                    subplot_titles=("Counts by Date – source_type",
+                                    "Counts by Date – source_type2_viz"),
+                    vertical_spacing=0.15, shared_xaxes=False)
 
-## 1. Executive Summary
+all_branches = ["All"] + branch_vals
+traces_meta = []  # (branch, row, is_line)
 
-This project implements an automated solution for **data retention management**, focusing on the timely **deletion of personal data** from various storage systems. By ensuring data is not held longer than necessary, the system supports compliance with the **General Data Protection Regulation (GDPR)**, particularly the principle of **storage limitation**. The core logic is executed within an **Azure Databricks notebook** and its operations are robustly orchestrated and monitored by **Azure Data Factory (ADF)**.
+for branch in all_branches:
+    df_b = df_result if branch == "All" else df_result.filter(F.col("BRANCH") == branch)
 
-## 2. Purpose & Legal Basis (GDPR)
+    # ── Graph 1 ──
+    pdf_type = (df_b.groupBy("date","source_type")
+                .agg(F.sum("count").alias("cnt"))
+                .toPandas()
+                .pivot(index="date", columns="source_type", values="cnt")
+                .fillna(0).reset_index())
+    pdf_type["date"] = pdf_type["date"].astype(str)
+    x1 = pdf_type["date"].tolist()
+    for col in ["remarketing","third party","datacap"]:
+        if col not in pdf_type.columns: pdf_type[col] = 0
 
-* **Purpose:** The primary goal is to enforce data retention policies by automatically identifying and removing data that has surpassed its defined storage period. This process is crucial for minimizing data exposure and reducing the risks associated with unnecessary data hoarding.
-* **Legal Basis:** The processing (deletion) of data by this system is performed to fulfill a **legal obligation** (GDPR Article 6.1.c). Specifically, it addresses the requirement of GDPR Article 5.1.e, which states that personal data shall be "kept in a form which permits identification of data subjects for no longer than is necessary for the purposes for which the personal data are processed."
+    for col, color in [("remarketing","#636EFA"),("third party","#EF5538"),("datacap","#00CC96")]:
+        # line
+        fig.add_trace(go.Scatter(x=x1, y=pdf_type[col].tolist(), name=col.title(),
+                                 mode="lines+markers", line=dict(color=color),
+                                 visible=(branch=="All"), legendgroup=col,
+                                 showlegend=(branch=="All")), row=1, col=1)
+        traces_meta.append((branch, 1, True))
+        # bar
+        fig.add_trace(go.Bar(x=x1, y=pdf_type[col].tolist(), name=col.title(),
+                             marker_color=color, visible=False,
+                             legendgroup=col, showlegend=False), row=1, col=1)
+        traces_meta.append((branch, 1, False))
 
-## 3. Scope & Data Types Affected
+    # ── Graph 2 ──
+    pdf_s2 = (df_b.groupBy("date","source_type","source_type2_viz")
+              .agg(F.sum("count").alias("cnt")).toPandas())
+    pdf_s2["date"] = pd.to_datetime(pdf_s2["date"])
+    dvals = pdf_s2["date"].dt.strftime("%Y-%m-%d").sort_values().unique().tolist()
 
-* **Scope:** The solution targets **data containers** – specifically, files residing in **Azure Data Lake Storage** and records within **Hive/Spark tables** managed by Databricks. These containers are presumed to hold personal data.
-* **Key Data for Retention Logic:** The script does not directly interpret the "personal" nature of data within files/records. Instead, it relies on metadata to apply retention rules:
-    * **File/Table Name:** Used for identification and context.
-    * **Subsidiary/Country Code:** Allows for distinct retention policies based on geographical or organizational entities.
-    * **Data Timestamp/Date Column:** The crucial element for determining if data has exceeded its retention period.
+    for src in ["remarketing","third party","datacap"]:
+        for sg in pdf_s2[pdf_s2["source_type"]==src]["source_type2_viz"].dropna().unique().tolist():
+            y = [int(pdf_s2[(pdf_s2["date"].dt.strftime("%Y-%m-%d")==d) &
+                            (pdf_s2["source_type"]==src) &
+                            (pdf_s2["source_type2_viz"]==sg)]["cnt"].sum()) for d in dvals]
+            color = palette.get(sg, palette.get(src, "#777777"))
+            # line
+            fig.add_trace(go.Scatter(x=dvals, y=y, name=f"{sg} ({src})",
+                                     mode="lines+markers", line=dict(width=2, color=color),
+                                     visible=(branch=="All"), legendgroup=f"{sg}_{src}",
+                                     showlegend=(branch=="All")), row=2, col=1)
+            traces_meta.append((branch, 2, True))
+            # bar
+            fig.add_trace(go.Bar(x=dvals, y=y, name=f"{sg} ({src})",
+                                 marker_color=color, visible=False,
+                                 legendgroup=f"{sg}_{src}", showlegend=False), row=2, col=1)
+            traces_meta.append((branch, 2, False))
 
-## 4. Technical Architecture & Component Roles
+total = len(traces_meta)
 
-The solution leverages key Azure services for a scalable and reliable data retention pipeline:
+# ── Branch buttons ──
+branch_buttons = []
+for branch in all_branches:
+    vis = []
+    for i, (b, row, is_line) in enumerate(traces_meta):
+        vis.append(b == branch and is_line)
+    branch_buttons.append(dict(label=branch, method="update",
+                               args=[{"visible": vis},
+                                     {"title": f"Forces VIZ | Branch: <b>{branch}</b>"}]))
 
-### 4.1. Azure Data Factory (ADF)
+# ── Lines/Bars buttons ──
+def toggle(show_lines):
+    return [is_line == show_lines and fig.data[i].visible != False
+            if True else False for i, (_,_,is_line) in enumerate(traces_meta)]
 
-Acts as the central orchestrator for the entire data retention process.
+# simpler toggle using current active branch (All by default)
+def vis_toggle(show_lines, active="All"):
+    return [b == active and (is_line if show_lines else not is_line)
+            for b, _, is_line in traces_meta]
 
-* **Pipelines:** ADF pipelines are designed with **conditional activities (IF statements)**. These conditions evaluate incoming parameters (e.g., presence of `folder_path` or `table_name`) to dynamically determine whether the current run should target Data Lake files or Hive/Spark tables.
-* **Parameter Passing:** ADF seamlessly passes user-defined or dynamic pipeline parameters (e.g., `table_name`, `folder_path`, `ad_hoc_months`) as arguments to the Databricks notebook. This allows for flexible and reusable execution of the retention logic across different datasets.
-* **Scheduled Triggers:** ADF pipelines can be scheduled to run at predefined intervals (e.g., daily, weekly), ensuring consistent and timely application of retention policies.
+line_bar_buttons = [
+    dict(label="Lines", method="update", args=[{"visible": vis_toggle(True)}]),
+    dict(label="Bars",  method="update", args=[{"visible": vis_toggle(False)}]),
+]
 
-### 4.2. Azure Databricks
+# ── Layout ──
+fig.update_layout(
+    title=dict(text="Forces VIZ | Branch: <b>All</b>", x=0.5, xanchor="center"),
+    template="plotly_white",
+    hovermode="x unified",
+    height=900,
+    yaxis_type="log", yaxis2_type="log",
+    legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.12),
+    margin=dict(t=130, b=100, l=60, r=40),
+    updatemenus=[
+        dict(buttons=branch_buttons, direction="down", showactive=True,
+             x=0.0, xanchor="left", y=1.12, yanchor="top",
+             bgcolor="#5B6EE1", font=dict(color="white")),
+        dict(buttons=line_bar_buttons, type="buttons", direction="right",
+             showactive=True, x=0.5, xanchor="center", y=1.12, yanchor="top",
+             bgcolor="#444", font=dict(color="white")),
+    ],
+    annotations=[
+        dict(text="<b>Branch:</b>", x=0.0, y=1.15,
+             xref="paper", yref="paper", showarrow=False),
+    ]
+)
 
-The computational engine where the core data retention logic resides.
+fig.show()
 
-* **Python Notebook (`/Common/GDPR_RetentionPeriod`):** This notebook is the heart of the solution.
-    * It receives input parameters from ADF via `dbutils.widgets`.
-    * It reads pre-defined **retention dictionaries** (e.g., from an external SQL database, as indicated by `readSqlSeverDatabaseFrom`) that map subsidiary or country codes to specific retention periods (`RetentionPeriod`).
-    * It calculates a **"Cut-Off Date" (`CutOffDate`)**. This date is either derived from the `ad_hoc_months` parameter (if an ad-hoc period is provided) or from the `RetentionPeriod` fetched from the retention dictionaries, subtracting the defined months from the current date.
-    * **Deletion Logic:**
-        * **For Data Lake Files:** The script uses `dbutils.fs.rm(file_path, True)` to delete files in Azure Data Lake Storage whose internal date (extracted from the file name based on `data_format`) is older than the `CutOffDate`. The `True` flag ensures recursive deletion for directories if applicable.
-        * **For Hive/Spark Tables:** The script constructs and executes SQL `TRUNCATE TABLE {table_name} WHERE {date_column_name} < '{CutOffDate}'` statements. This efficiently removes records from the specified table where the date in the `date_column_name` is older than the `CutOffDate`.
-
-## 5. Control, Audit & Reporting Mechanisms
-
-Robust logging and reporting are critical for demonstrating GDPR compliance and providing operational oversight:
-
-* **Centralized Log Table (`risk_compliance_gdpr.gdpr_log`):**
-    * Every execution of the retention process, whether successful or failed, is meticulously logged into this dedicated Hive/Spark table.
-    * Logged details include: `ValueDate` (execution date), `fileName`/`tableName` (the data asset processed), `SubsidiaryCode`, `RetentionPeriod` applied, `CutOffDate` used, `Result` (e.g., "EXECUTED CORRECTLY", "Date is not correct"), and `AffectedRows` (number of files/records deleted).
-    * This detailed record provides an essential audit trail, crucial for **accountability** (GDPR Article 5.2).
-* **Automated Email Notifications:**
-    * Upon completion of the retention process, particularly when `process` is set to "Email," the script generates an HTML report directly from the `gdpr_log` table.
-    * This report is then automatically sent via email to pre-configured recipients (e.g., `email_toaddr`, `email_ccaddr`), providing timely updates on the success, failures, and scope of each retention run.
-
-## 6. Security & GDPR Compliance Aspects
-
-* **Azure Platform Security:** The solution benefits from the inherent security features of the Azure platform:
-    * **Role-Based Access Control (RBAC):** Access to ADF pipelines, Databricks workspaces, and Data Lake Storage accounts is strictly controlled through Azure RBAC, ensuring only authorized identities can deploy, run, or modify the retention process.
-    * **Network Security:** Communication between ADF, Databricks, and Data Lake occurs securely within the Azure network.
-    * **Activity Logging & Auditing:** All activities within ADF and Databricks are logged in Azure Monitor and Azure Log Analytics, providing a comprehensive audit trail for security and compliance purposes.
-* **Contribution to Data Subject Rights:** By implementing automated data deletion based on retention periods, the system directly supports the organization's ability to comply with the **right to erasure ("right to be forgotten")** (GDPR Article 17). It ensures that personal data is not retained beyond its necessary purpose, which is a prerequisite for effective exercise of this right.
-* **Defined Responsibilities:**
-    * **Data Controller:** The organization deploying and utilizing this solution, as it determines the purposes and means of the data processing (including retention and deletion).
-    * **Data Processor:** Microsoft Azure (ADF, Databricks, Data Lake) acts as a data processor by providing the infrastructure and services.
-    * **Administrators/Operators:** Personnel responsible for configuring, monitoring, and maintaining the ADF pipelines and Databricks notebooks, as well as reviewing logs and addressing any issues.
-
-## 7. Key Parameters
-
-The following are the primary parameters configured within the ADF pipeline, passed to and consumed by the Databricks notebook:
-
-* `table_name`: (For Hive tables) Schema and name of the table(s) to process.
-* `subsidiary_column_name`: (For Hive tables) Column containing subsidiary code.
-* `date_column_name`: (For Hive tables) Column containing the date for retention calculation.
-* `folder_path`: (For Data Lake files) Path to the folder containing files to be deleted.
-* `file_name`: (For Data Lake files) Constant or pattern for file names.
-* `data_format`: (For Data Lake files) Expected date format in file names (e.g., 'dd-MM-yyyy').
-* `process`: Controls the notebook's execution flow (e.g., `"Hives"` for tables, `"Email"` for reporting). The file processing is often inferred by the presence of `folder_path` and `file_name`.
-* `ad_hoc_months`: An optional integer specifying an ad-hoc retention period in months, overriding default policies.
-* `is_ad_hoc`: Boolean flag indicating if `ad_hoc_months` is being used.
-* `sub_or_country`: Determines if retention is based on subsidiary or country data.
+# ── Export HTML ──
+OUTPUT_PATH = "/Workspace/Users/TU_EMAIL@dominio.com/forces_viz.html"
+os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+fig.write_html(OUTPUT_PATH, include_plotlyjs="cdn", full_html=True,
+               config={"scrollZoom": True})
+print(f"✅ {OUTPUT_PATH}")
