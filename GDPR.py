@@ -272,3 +272,17 @@ os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
 fig.write_html(OUTPUT_PATH, include_plotlyjs="cdn", full_html=True,
                config={"scrollZoom": True})
 print(f"✅ Exportado: {OUTPUT_PATH}")
+
+
+# DEBUG — ejecuta esto y dime qué imprime
+print("Tipo date:", pdf_s2_all["date"].dtype)
+print("Muestra:", pdf_s2_all.head(3))
+print("Filas totales:", len(pdf_s2_all))
+print("source_type únicos:", pdf_s2_all["source_type"].unique())
+print("source_type2_viz únicos:", pdf_s2_all["source_type2_viz"].unique())
+
+# Test directo de get_y_s2
+src_test = pdf_s2_all["source_type"].iloc[0]
+sg_test  = pdf_s2_all["source_type2_viz"].iloc[0]
+y_test   = get_y_s2(pdf_s2_all, src_test, sg_test, date_vals_all)
+print(f"Test y_vals para {src_test} / {sg_test}:", y_test[:5])
