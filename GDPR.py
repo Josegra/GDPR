@@ -38,27 +38,30 @@ branch_vals  = sorted([b for b in df_result.select("BRANCH").distinct()
 all_branches = ["All"] + branch_vals
 
 # ════════════════════════════════════════════════
-# HELPERS — PySpark
+# HELPERS
 # ════════════════════════════════════════════════
 def get_pdf_type(data):
     pdf = (data.groupBy("date", "source_type")
                .agg(F.sum("count").alias("cnt"))
                .toPandas())
-    pdf["date"] = pd.to_datetime(pdf["date"])
+    pdf["date"] = pd.to_datetime(pdf["date"]).dt.normalize()
     pdf = (pdf.pivot(index="date", columns="source_type", values="cnt")
               .fillna(0).reset_index()
               .sort_values("date"))
     for col in ["remarketing", "third party", "datacap"]:
         if col not in pdf.columns:
             pdf[col] = 0
+    # devuelve fechas como strings
+    pdf["date"] = pdf["date"].dt.strftime("%Y-%m-%d")
     return pdf
 
 def get_pdf_s2(data):
     pdf = (data.groupBy("date", "source_type", "source_type2_viz")
                .agg(F.sum("count").alias("cnt"))
                .toPandas())
-    pdf["date"] = pd.to_datetime(pdf["date"])
+    pdf["date"] = pd.to_datetime(pdf["date"]).dt.normalize()
     pdf = pdf[pdf["source_type2_viz"].notna()]
+    pdf["date"] = pdf["date"].dt.strftime("%Y-%m-%d")  # strings
     pdf = pdf.sort_values("date").reset_index(drop=True)
     return pdf
 
@@ -67,16 +70,16 @@ def get_y_s2(pdf, src, sg, date_vals):
         (pdf["source_type"] == src) &
         (pdf["source_type2_viz"] == sg)
     ][["date", "cnt"]].copy()
-    sub = sub.groupby("date")["cnt"].sum()
-    return [int(sub.get(pd.Timestamp(d), 0)) for d in date_vals]
+    sub = sub.groupby("date")["cnt"].sum()  # índice = string "%Y-%m-%d"
+    return [int(sub.get(d, 0)) for d in date_vals]
 
 # ════════════════════════════════════════════════
 # PRECOMPUTA "ALL"
 # ════════════════════════════════════════════════
 pdf_type_all  = get_pdf_type(df_result)
 pdf_s2_all    = get_pdf_s2(df_result)
-x_dates_all   = pdf_type_all["date"].tolist()
-date_vals_all = pdf_s2_all["date"].sort_values().unique().tolist()
+x_dates_all   = pdf_type_all["date"].tolist()          # strings
+date_vals_all = sorted(pdf_s2_all["date"].unique().tolist())  # strings
 
 # ════════════════════════════════════════════════
 # FIGURA
@@ -202,7 +205,7 @@ for branch in all_branches:
     pdf_b1  = get_pdf_type(df_b)
     pdf_b2  = get_pdf_s2(df_b)
     x1      = pdf_b1["date"].tolist()
-    dvals_b = pdf_b2["date"].sort_values().unique().tolist()
+    dvals_b = sorted(pdf_b2["date"].unique().tolist())  # strings
 
     new_x, new_y = [], []
 
