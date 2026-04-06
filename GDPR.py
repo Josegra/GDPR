@@ -12,16 +12,15 @@ palette = {
     "third party":          "#EF5538",
     "datacap":              "#00CC96",
     "Customer":             "#1f77b4",
-    "UBO":                  "#ff7f0e",
-    "Representative":       "#2ca02c",
+    "Remarketing Dealer":   "#ff7f0e",
+    "Legal Representative": "#2ca02c",
     "Shareholder":          "#d62728",
-    "Director":             "#9467bd",
-    "CUS_PRIVATE":          "#e377c2",
-    "SUPPLIER":             "#7f7f7f",
-    "CUS CORPORATE":        "#8c564b",
-    "Remarketing Dealer":   "#bcbd22",
-    "Legal Representative": "#17becf",
-    "other third parties":  "#aec7e8",
+    "Guarantor":            "#9467bd",
+    "Unknown":              "#8c564b",
+    "Supplier":             "#e377c2",
+    "Parent":               "#7f7f7f",
+    "CUS_CORPORATE":        "#bcbd22",
+    "CUS_PRIVATE":          "#17becf",
 }
 
 all_s2 = (df_result.select("source_type2_viz").distinct()
@@ -39,7 +38,7 @@ branch_vals  = sorted([b for b in df_result.select("BRANCH").distinct()
 all_branches = ["All"] + branch_vals
 
 # ════════════════════════════════════════════════
-# HELPERS
+# HELPERS — PySpark
 # ════════════════════════════════════════════════
 def get_pdf_type(data):
     pdf = (data.groupBy("date", "source_type")
@@ -63,7 +62,6 @@ def get_pdf_s2(data):
     pdf = pdf.sort_values("date").reset_index(drop=True)
     return pdf
 
-# FIX: pd.Timestamp para el lookup, sin sorted()
 def get_y_s2(pdf, src, sg, date_vals):
     sub = pdf[
         (pdf["source_type"] == src) &
@@ -78,7 +76,6 @@ def get_y_s2(pdf, src, sg, date_vals):
 pdf_type_all  = get_pdf_type(df_result)
 pdf_s2_all    = get_pdf_s2(df_result)
 x_dates_all   = pdf_type_all["date"].tolist()
-# FIX: sin sorted(), mantiene Timestamps
 date_vals_all = pdf_s2_all["date"].sort_values().unique().tolist()
 
 # ════════════════════════════════════════════════
@@ -113,7 +110,7 @@ for col, color in [("remarketing","#636EFA"),
         visible=False, legendgroup=col, showlegend=False,
     ), row=1, col=1)
 
-n1 = 3  # traces 0-2 lines | traces 3-5 bars
+n1 = 3
 
 # ── GRAPH 2: lines + bars ──
 traces_line_g2 = []
@@ -205,7 +202,7 @@ for branch in all_branches:
     pdf_b1  = get_pdf_type(df_b)
     pdf_b2  = get_pdf_s2(df_b)
     x1      = pdf_b1["date"].tolist()
-    dvals_b = pdf_b2["date"].sort_values().unique().tolist()  # sin sorted()
+    dvals_b = pdf_b2["date"].sort_values().unique().tolist()
 
     new_x, new_y = [], []
 
