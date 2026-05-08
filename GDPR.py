@@ -31,15 +31,25 @@ for i, s2 in enumerate(all_s2):
         palette[s2] = extra_colors[i]
 
 # ════════════════════════════════════════════════
-# BRANCH VALUES
+# BRANCH + TYPE_COL VALUES
 # ════════════════════════════════════════════════
 branch_vals  = sorted([b for b in df_result.select("BRANCH").distinct()
                        .rdd.flatMap(lambda x: x).collect() if b])
 all_branches = ["All"] + branch_vals
 
+type_vals    = sorted([t for t in df_result.select("type_col").distinct()
+                       .rdd.flatMap(lambda x: x).collect() if t])
+all_types    = ["All"] + type_vals
+
 # ════════════════════════════════════════════════
 # HELPERS
 # ════════════════════════════════════════════════
+def filter_df(branch, type_col):
+    data = df_result
+    if branch  != "All": data = data.filter(F.col("BRANCH")   == branch)
+    if type_col != "All": data = data.filter(F.col("type_col") == type_col)
+    return data
+
 def get_pdf_type(data):
     pdf = (data.groupBy("date", "source_type")
                .agg(F.sum("count").alias("cnt"))
@@ -51,7 +61,6 @@ def get_pdf_type(data):
     for col in ["remarketing", "third party", "datacap"]:
         if col not in pdf.columns:
             pdf[col] = 0
-    # devuelve fechas como strings
     pdf["date"] = pdf["date"].dt.strftime("%Y-%m-%d")
     return pdf
 
@@ -61,7 +70,7 @@ def get_pdf_s2(data):
                .toPandas())
     pdf["date"] = pd.to_datetime(pdf["date"]).dt.normalize()
     pdf = pdf[pdf["source_type2_viz"].notna()]
-    pdf["date"] = pdf["date"].dt.strftime("%Y-%m-%d")  # strings
+    pdf["date"] = pdf["date"].dt.strftime("%Y-%m-%d")
     pdf = pdf.sort_values("date").reset_index(drop=True)
     return pdf
 
@@ -70,16 +79,23 @@ def get_y_s2(pdf, src, sg, date_vals):
         (pdf["source_type"] == src) &
         (pdf["source_type2_viz"] == sg)
     ][["date", "cnt"]].copy()
-    sub = sub.groupby("date")["cnt"].sum()  # índice = string "%Y-%m-%d"
+    sub = sub.groupby("date")["cnt"].sum()
     return [int(sub.get(d, 0)) for d in date_vals]
 
 # ════════════════════════════════════════════════
-# PRECOMPUTA "ALL"
+# PRECOMPUTA "All / All"
 # ════════════════════════════════════════════════
 pdf_type_all  = get_pdf_type(df_result)
 pdf_s2_all    = get_pdf_s2(df_result)
-x_dates_all   = pdf_type_all["date"].tolist()          # strings
-date_vals_all = sorted(pdf_s2_all["date"].unique().tolist())  # strings
+x_dates_all   = pdf_type_all["date"].tolist()
+date_vals_all = sorted(pdf_s2_all["date"].unique().tolist())
+
+g2_structure = []
+for src in ["remarketing", "third party", "datacap"]:
+    subs = (pdf_s2_all[pdf_s2_all["source_type"] == src]["source_type2_viz"]
+            .dropna().unique().tolist())
+    for sg in subs:
+        g2_structure.append((src, sg))
 
 # ════════════════════════════════════════════════
 # FIGURA
@@ -118,30 +134,25 @@ n1 = 3
 # ── GRAPH 2: lines + bars ──
 traces_line_g2 = []
 traces_bar_g2  = []
-g2_structure   = []
 
-for src in ["remarketing", "third party", "datacap"]:
-    subs = (pdf_s2_all[pdf_s2_all["source_type"] == src]["source_type2_viz"]
-            .dropna().unique().tolist())
-    for sg in subs:
-        y_vals = get_y_s2(pdf_s2_all, src, sg, date_vals_all)
-        color  = palette.get(sg, palette.get(src, "#777777"))
+for src, sg in g2_structure:
+    y_vals = get_y_s2(pdf_s2_all, src, sg, date_vals_all)
+    color  = palette.get(sg, palette.get(src, "#777777"))
 
-        fig.add_trace(go.Scatter(
-            x=date_vals_all, y=y_vals,
-            name=f"{sg} ({src})", mode="lines+markers",
-            line=dict(width=2, color=color), marker=dict(size=4),
-            visible=False, legendgroup=sg, showlegend=True,
-        ), row=2, col=1)
-        traces_line_g2.append(len(fig.data) - 1)
-        g2_structure.append((src, sg))
+    fig.add_trace(go.Scatter(
+        x=date_vals_all, y=y_vals,
+        name=f"{sg} ({src})", mode="lines+markers",
+        line=dict(width=2, color=color), marker=dict(size=4),
+        visible=False, legendgroup=sg, showlegend=True,
+    ), row=2, col=1)
+    traces_line_g2.append(len(fig.data) - 1)
 
-        fig.add_trace(go.Bar(
-            x=date_vals_all, y=y_vals,
-            name=f"{sg} ({src})", marker_color=color,
-            visible=False, legendgroup=sg, showlegend=False,
-        ), row=2, col=1)
-        traces_bar_g2.append(len(fig.data) - 1)
+    fig.add_trace(go.Bar(
+        x=date_vals_all, y=y_vals,
+        name=f"{sg} ({src})", marker_color=color,
+        visible=False, legendgroup=sg, showlegend=False,
+    ), row=2, col=1)
+    traces_bar_g2.append(len(fig.data) - 1)
 
 total = len(fig.data)
 
@@ -155,6 +166,27 @@ for i in range(n1, n1 * 2):
 for i, (src, sg) in enumerate(g2_structure):
     if src == "remarketing":
         fig.data[traces_line_g2[i]].visible = True
+
+# ════════════════════════════════════════════════
+# HELPER — recalcula x,y para branch + type_col
+# ════════════════════════════════════════════════
+def make_update(branch, type_col):
+    df_b   = filter_df(branch, type_col)
+    pdf_b1 = get_pdf_type(df_b)
+    pdf_b2 = get_pdf_s2(df_b)
+    x1     = pdf_b1["date"].tolist()
+    dvals  = sorted(pdf_b2["date"].unique().tolist())
+
+    new_x, new_y = [], []
+    for col in ["remarketing", "third party", "datacap"]:
+        new_x.append(x1); new_y.append(pdf_b1[col].tolist())
+    for col in ["remarketing", "third party", "datacap"]:
+        new_x.append(x1); new_y.append(pdf_b1[col].tolist())
+    for src, sg in g2_structure:
+        y = get_y_s2(pdf_b2, src, sg, dvals)
+        new_x.append(dvals); new_y.append(y)
+        new_x.append(dvals); new_y.append(y)
+    return new_x, new_y
 
 # ════════════════════════════════════════════════
 # BUTTONS G1
@@ -179,8 +211,8 @@ buttons_g1 = [
 # ════════════════════════════════════════════════
 buttons_g2 = []
 for src in ["remarketing", "third party", "datacap"]:
-    line_idx = [traces_line_g2[i] for i, (s, _) in enumerate(g2_structure) if s == src]
-    bar_idx  = [traces_bar_g2[i]  for i, (s, _) in enumerate(g2_structure) if s == src]
+    line_idx = [traces_line_g2[i] for i, (s,_) in enumerate(g2_structure) if s == src]
+    bar_idx  = [traces_bar_g2[i]  for i, (s,_) in enumerate(g2_structure) if s == src]
 
     vis_lines = [False] * total
     for i in range(n1):  vis_lines[i]      = True
@@ -197,39 +229,34 @@ for src in ["remarketing", "third party", "datacap"]:
                            method="update", args=[{"visible": vis_bars}]))
 
 # ════════════════════════════════════════════════
-# BRANCH DROPDOWN
+# BRANCH DROPDOWN — usa make_update con type=All
 # ════════════════════════════════════════════════
 branch_buttons = []
 for branch in all_branches:
-    df_b    = df_result if branch == "All" else df_result.filter(F.col("BRANCH") == branch)
-    pdf_b1  = get_pdf_type(df_b)
-    pdf_b2  = get_pdf_s2(df_b)
-    x1      = pdf_b1["date"].tolist()
-    dvals_b = sorted(pdf_b2["date"].unique().tolist())  # strings
-
-    new_x, new_y = [], []
-
-    for col in ["remarketing", "third party", "datacap"]:
-        new_x.append(x1); new_y.append(pdf_b1[col].tolist())
-    for col in ["remarketing", "third party", "datacap"]:
-        new_x.append(x1); new_y.append(pdf_b1[col].tolist())
-
-    for src, sg in g2_structure:
-        y = get_y_s2(pdf_b2, src, sg, dvals_b)
-        new_x.append(dvals_b); new_y.append(y)
-        new_x.append(dvals_b); new_y.append(y)
-
+    new_x, new_y = make_update(branch, "All")
     branch_buttons.append(dict(
         label=branch, method="update",
         args=[{"x": new_x, "y": new_y},
-              {"title": f"Forces VIZ | Branch: <b>{branch}</b>"}]
+              {"title": f"Forces VIZ | Branch: <b>{branch}</b> | Type: <b>All</b>"}]
+    ))
+
+# ════════════════════════════════════════════════
+# TYPE_COL DROPDOWN — nuevo filtro
+# ════════════════════════════════════════════════
+type_buttons = []
+for type_col in all_types:
+    new_x, new_y = make_update("All", type_col)
+    type_buttons.append(dict(
+        label=type_col, method="update",
+        args=[{"x": new_x, "y": new_y},
+              {"title": f"Forces VIZ | Branch: <b>All</b> | Type: <b>{type_col}</b>"}]
     ))
 
 # ════════════════════════════════════════════════
 # LAYOUT
 # ════════════════════════════════════════════════
 fig.update_layout(
-    title=dict(text="Forces VIZ | Branch: <b>All</b>",
+    title=dict(text="Forces VIZ | Branch: <b>All</b> | Type: <b>All</b>",
                x=0.5, xanchor="center", font=dict(size=16)),
     template="plotly_white",
     hovermode="x unified",
@@ -239,21 +266,30 @@ fig.update_layout(
     xaxis=dict( type="date", showticklabels=False),
     xaxis2=dict(type="date", title="Date"),
     legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.12),
-    margin=dict(t=150, b=100, l=60, r=40),
+    margin=dict(t=160, b=100, l=60, r=40),
     updatemenus=[
+        # ── Branch dropdown ──
         dict(buttons=branch_buttons, direction="down", showactive=True,
-             x=0.0, xanchor="left", y=1.13, yanchor="top",
+             x=0.0, xanchor="left", y=1.15, yanchor="top",
              bgcolor="#5B6EE1", font=dict(color="white")),
+        # ── Type_col dropdown — NUEVO ──
+        dict(buttons=type_buttons, direction="down", showactive=True,
+             x=0.25, xanchor="left", y=1.15, yanchor="top",
+             bgcolor="#E15B5B", font=dict(color="white")),
+        # ── G1 Lines/Bars ──
         dict(buttons=buttons_g1, type="buttons", direction="right",
-             showactive=True, x=0.5, xanchor="center", y=1.13, yanchor="top",
+             showactive=True, x=0.55, xanchor="left", y=1.15, yanchor="top",
              bgcolor="#444", font=dict(color="white")),
+        # ── G2 source_type ──
         dict(buttons=buttons_g2, type="buttons", direction="right",
              showactive=True, x=0.5, xanchor="center", y=0.46, yanchor="top",
              bgcolor="#2a2a2a", font=dict(color="white")),
     ],
     annotations=[
-        dict(text="<b>Branch:</b>", x=0.0, y=1.16,
-             xref="paper", yref="paper", showarrow=False, font=dict(size=12)),
+        dict(text="<b>Branch:</b>", x=0.0,  y=1.18,
+             xref="paper", yref="paper", showarrow=False, font=dict(size=11)),
+        dict(text="<b>Type:</b>",   x=0.25, y=1.18,
+             xref="paper", yref="paper", showarrow=False, font=dict(size=11)),
     ]
 )
 
