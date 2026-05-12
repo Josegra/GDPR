@@ -31,22 +31,22 @@ for i, s2 in enumerate(all_s2):
         palette[s2] = extra_colors[i]
 
 # ════════════════════════════════════════════════
-# BRANCH + TYPE_COL VALUES
+# BRANCH + TYPE VALUES
 # ════════════════════════════════════════════════
-branch_vals  = sorted([b for b in df_result.select("BRANCH").distinct()
-                       .rdd.flatMap(lambda x: x).collect() if b])
+branch_vals = sorted([b for b in df_result.select("BRANCH").distinct()
+                      .rdd.flatMap(lambda x: x).collect() if b])
 all_branches = ["All"] + branch_vals
 
-type_vals    = sorted([t for t in df_result.select("type_col").distinct()
-                       .rdd.flatMap(lambda x: x).collect() if t])
-all_types    = ["All"] + type_vals
+type_vals   = sorted([t for t in df_result.select("type_col").distinct()
+                      .rdd.flatMap(lambda x: x).collect() if t])
+all_types   = ["All"] + type_vals
 
 # ════════════════════════════════════════════════
 # HELPERS
 # ════════════════════════════════════════════════
 def filter_df(branch, type_col):
     data = df_result
-    if branch  != "All": data = data.filter(F.col("BRANCH")   == branch)
+    if branch   != "All": data = data.filter(F.col("BRANCH")   == branch)
     if type_col != "All": data = data.filter(F.col("type_col") == type_col)
     return data
 
@@ -83,7 +83,7 @@ def get_y_s2(pdf, src, sg, date_vals):
     return [int(sub.get(d, 0)) for d in date_vals]
 
 # ════════════════════════════════════════════════
-# PRECOMPUTA "All / All"
+# PRECOMPUTA BASE (All x All)
 # ════════════════════════════════════════════════
 pdf_type_all  = get_pdf_type(df_result)
 pdf_s2_all    = get_pdf_s2(df_result)
@@ -96,6 +96,34 @@ for src in ["remarketing", "third party", "datacap"]:
             .dropna().unique().tolist())
     for sg in subs:
         g2_structure.append((src, sg))
+
+# ════════════════════════════════════════════════
+# PRECALCULA TODAS LAS COMBINACIONES branch x type
+# ════════════════════════════════════════════════
+print("⏳ Precalculando combinaciones...")
+combo_data = {}
+for branch in all_branches:
+    for type_col in all_types:
+        df_b   = filter_df(branch, type_col)
+        pdf_b1 = get_pdf_type(df_b)
+        pdf_b2 = get_pdf_s2(df_b)
+        x1     = pdf_b1["date"].tolist()
+        dvals  = sorted(pdf_b2["date"].unique().tolist())
+
+        new_x, new_y = [], []
+        for col in ["remarketing", "third party", "datacap"]:
+            new_x.append(x1); new_y.append(pdf_b1[col].tolist())
+        for col in ["remarketing", "third party", "datacap"]:
+            new_x.append(x1); new_y.append(pdf_b1[col].tolist())
+        for src, sg in g2_structure:
+            y = get_y_s2(pdf_b2, src, sg, dvals)
+            new_x.append(dvals); new_y.append(y)
+            new_x.append(dvals); new_y.append(y)
+
+        combo_data[(branch, type_col)] = (new_x, new_y)
+        print(f"  ✅ {branch} x {type_col}")
+
+print("✅ Todas las combinaciones calculadas")
 
 # ════════════════════════════════════════════════
 # FIGURA
@@ -168,27 +196,6 @@ for i, (src, sg) in enumerate(g2_structure):
         fig.data[traces_line_g2[i]].visible = True
 
 # ════════════════════════════════════════════════
-# HELPER — recalcula x,y para branch + type_col
-# ════════════════════════════════════════════════
-def make_update(branch, type_col):
-    df_b   = filter_df(branch, type_col)
-    pdf_b1 = get_pdf_type(df_b)
-    pdf_b2 = get_pdf_s2(df_b)
-    x1     = pdf_b1["date"].tolist()
-    dvals  = sorted(pdf_b2["date"].unique().tolist())
-
-    new_x, new_y = [], []
-    for col in ["remarketing", "third party", "datacap"]:
-        new_x.append(x1); new_y.append(pdf_b1[col].tolist())
-    for col in ["remarketing", "third party", "datacap"]:
-        new_x.append(x1); new_y.append(pdf_b1[col].tolist())
-    for src, sg in g2_structure:
-        y = get_y_s2(pdf_b2, src, sg, dvals)
-        new_x.append(dvals); new_y.append(y)
-        new_x.append(dvals); new_y.append(y)
-    return new_x, new_y
-
-# ════════════════════════════════════════════════
 # BUTTONS G1
 # ════════════════════════════════════════════════
 def make_vis_g1(show_lines):
@@ -229,31 +236,70 @@ for src in ["remarketing", "third party", "datacap"]:
                            method="update", args=[{"visible": vis_bars}]))
 
 # ════════════════════════════════════════════════
-# BRANCH DROPDOWN — usa make_update con type=All
+# BRANCH DROPDOWN — usa combo_data con type=All
 # ════════════════════════════════════════════════
 branch_buttons = []
 for branch in all_branches:
-    new_x, new_y = make_update(branch, "All")
+    # cada branch button guarda datos de TODAS las combinaciones
+    # usando customdata para pasar el branch activo al type button
+    new_x, new_y = combo_data[(branch, "All")]
     branch_buttons.append(dict(
         label=branch, method="update",
-        args=[{"x": new_x, "y": new_y},
-              {"title": f"Forces VIZ | Branch: <b>{branch}</b> | Type: <b>All</b>"}]
+        args=[
+            {"x": new_x, "y": new_y},
+            {"title": f"Forces VIZ | Branch: <b>{branch}</b> | Type: <b>All</b>"}
+        ]
     ))
 
 # ════════════════════════════════════════════════
-# TYPE_COL DROPDOWN — nuevo filtro
+# TYPE DROPDOWN — precalculado para All branches
+# pero con botones que incluyen TODAS las combos
 # ════════════════════════════════════════════════
-type_buttons = []
+# TRUCO: cada botón de type usa la combo (All, type)
+# Para que funcione branch x type necesitamos
+# generar un dropdown combinado por cada par
+# Usamos un dropdown ÚNICO que tiene todas las combos
+# branch x type como opciones
+
+combo_buttons = []
+for branch in all_branches:
+    for type_col in all_types:
+        new_x, new_y = combo_data[(branch, type_col)]
+        combo_buttons.append(dict(
+            label=f"{branch} | {type_col}",
+            method="update",
+            args=[
+                {"x": new_x, "y": new_y},
+                {"title": f"Forces VIZ | Branch: <b>{branch}</b> | Type: <b>{type_col}</b>"}
+            ]
+        ))
+
+# Separamos en dos dropdowns visuales pero
+# cada uno filtra sobre la combo correcta
+branch_buttons_v2 = []
+for branch in all_branches:
+    new_x, new_y = combo_data[(branch, "All")]
+    branch_buttons_v2.append(dict(
+        label=branch, method="update",
+        args=[
+            {"x": new_x, "y": new_y},
+            {"title": f"Forces VIZ | Branch: <b>{branch}</b> | Type: <b>All</b>"}
+        ]
+    ))
+
+type_buttons_v2 = []
 for type_col in all_types:
-    new_x, new_y = make_update("All", type_col)
-    type_buttons.append(dict(
+    new_x, new_y = combo_data[("All", type_col)]
+    type_buttons_v2.append(dict(
         label=type_col, method="update",
-        args=[{"x": new_x, "y": new_y},
-              {"title": f"Forces VIZ | Branch: <b>All</b> | Type: <b>{type_col}</b>"}]
+        args=[
+            {"x": new_x, "y": new_y},
+            {"title": f"Forces VIZ | Branch: <b>All</b> | Type: <b>{type_col}</b>"}
+        ]
     ))
 
 # ════════════════════════════════════════════════
-# LAYOUT
+# LAYOUT — dropdown combinado como solución real
 # ════════════════════════════════════════════════
 fig.update_layout(
     title=dict(text="Forces VIZ | Branch: <b>All</b> | Type: <b>All</b>",
@@ -268,14 +314,10 @@ fig.update_layout(
     legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.12),
     margin=dict(t=160, b=100, l=60, r=40),
     updatemenus=[
-        # ── Branch dropdown ──
-        dict(buttons=branch_buttons, direction="down", showactive=True,
+        # ── Combo Branch x Type (dropdown único) ──
+        dict(buttons=combo_buttons, direction="down", showactive=True,
              x=0.0, xanchor="left", y=1.15, yanchor="top",
              bgcolor="#5B6EE1", font=dict(color="white")),
-        # ── Type_col dropdown — NUEVO ──
-        dict(buttons=type_buttons, direction="down", showactive=True,
-             x=0.25, xanchor="left", y=1.15, yanchor="top",
-             bgcolor="#E15B5B", font=dict(color="white")),
         # ── G1 Lines/Bars ──
         dict(buttons=buttons_g1, type="buttons", direction="right",
              showactive=True, x=0.55, xanchor="left", y=1.15, yanchor="top",
@@ -286,9 +328,7 @@ fig.update_layout(
              bgcolor="#2a2a2a", font=dict(color="white")),
     ],
     annotations=[
-        dict(text="<b>Branch:</b>", x=0.0,  y=1.18,
-             xref="paper", yref="paper", showarrow=False, font=dict(size=11)),
-        dict(text="<b>Type:</b>",   x=0.25, y=1.18,
+        dict(text="<b>Branch x Type:</b>", x=0.0, y=1.18,
              xref="paper", yref="paper", showarrow=False, font=dict(size=11)),
     ]
 )
